@@ -1,3 +1,5 @@
+*.dlt
+*.lst
 *.brk
 *.bmk
 *.dic

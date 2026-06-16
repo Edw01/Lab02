@@ -1,3 +1,6 @@
+*.brk
+*.bmk
+*.dic
 *.hex
 *.cof
 *.dbg
@@ -17,7 +20,7 @@
 *.BK*
 *.ERR
 *.LOG
-Last\ Loaded\ *
+Last?Loaded*
 *.idx
 *.avw
 *.smf

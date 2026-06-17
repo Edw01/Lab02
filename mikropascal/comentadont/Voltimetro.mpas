@@ -1,0 +1,152 @@
+program Voltimetro;
+
+const TX_PIN = 5; // GP5 (Pin 2 del PIC físico) conectado a CNX
+
+// Retardo sintonizado a mano para 9600 baudios corriendo a 4MHz internos
+procedure Delay_Baud_9600;
+begin
+  Delay_us(85);
+end;
+
+// Procedimiento nativo de transmisión serial Bit-Bang
+procedure Serial_Write_Byte(d: Byte);
+var
+  bit_count: Byte;
+begin
+  // 1. Bit de Inicio
+  GPIO.TX_PIN := 0;
+  Delay_Baud_9600;
+
+  // 2. Enviar los 8 bits de datos
+  for bit_count := 0 to 7 do
+  begin
+    if (d and 1) = 1 then
+      GPIO.TX_PIN := 1
+    else
+      GPIO.TX_PIN := 0;
+
+    d := d shr 1;
+    Delay_Baud_9600;
+  end;
+
+  // 3. Bit de Parada
+  GPIO.TX_PIN := 1;
+  Delay_Baud_9600;
+end;
+
+// Función nativa para leer el ADC
+function Read_ADC_Channel(channel: Byte): Word;
+begin
+  // ADCON0: Limpiamos los bits de canal (bits 3 y 2) usando una máscara binaria
+  // %11110011 apaga los bits del canal viejo sin afectar el resto de la configuración
+  ADCON0 := (ADCON0 and %11110011) or (channel shl 2);
+  ADCON0.0 := 1; // Asegurar que el ADC está encendido
+
+  Delay_us(30); // Tiempo de muestreo
+
+  ADCON0.1 := 1; // Iniciar conversión
+
+  while ADCON0.1 = 1 do; // Esperar a que termine
+
+  // Retornar la lectura de 10 bits
+  Result := (ADRESH shl 8) or ADRESL;
+end;
+
+// Envía un comando de control a la pantalla Milford
+procedure Milford_Clear_Screen;
+begin
+  Serial_Write_Byte(12); // Borrar pantalla
+  Delay_ms(10);
+end;
+
+procedure Milford_GoTo(pos: Byte);
+begin
+  Serial_Write_Byte(254);
+  Serial_Write_Byte(pos);
+  Delay_us(100);
+end;
+
+// Procesa matemáticamente el voltaje y lo imprime
+procedure Imprimir_Canal(ch_num: Byte; adc_value: Word);
+var
+  v_total: DWord;
+  entero, dec1, dec2: Byte;
+begin
+  v_total := (adc_value * 500) div 1023;
+
+  entero := v_total div 100;
+  dec1   := (v_total div 10) mod 10;
+  dec2   := v_total mod 10;
+
+  Serial_Write_Byte(67); // 'C'
+  Serial_Write_Byte(72); // 'H'
+  Serial_Write_Byte(48 + ch_num);
+  Serial_Write_Byte(58); // ':'
+  Serial_Write_Byte(32); // Espacio
+
+  Serial_Write_Byte(48 + entero);
+  Serial_Write_Byte(46); // '.'
+  Serial_Write_Byte(48 + dec1);
+  Serial_Write_Byte(48 + dec2);
+  Serial_Write_Byte(86); // 'V'
+end;
+
+{ --- BLOQUE PRINCIPAL DEL PROGRAMA --- }
+var
+  adc_val: Word;
+
+begin
+  // 1. Desactivar periféricos que interfieren
+  CMCON := 7;
+
+  // 2. Configurar Pines Analógicos (ANSEL)
+  // Bits: - | ADCS2 | ADCS1 | ADCS0 | ANS3 | ANS2 | ANS1 | ANS0
+  // Fosc/8 (001) y activamos analógicos 3, 2, 1 y 0 (1111)
+  ANSEL := %00011111;
+
+  // 3. Configurar Direcciones (TRISIO)
+  // Bits: - | - | TRISIO5 | TRISIO4 | TRISIO3 | TRISIO2 | TRISIO1 | TRISIO0
+  // GP5 salida (0), GP4 entrada (1), GP3 entrada (1), GP2 entrada (1), GP1 entrada (1), GP0 entrada (1)
+  // Nota: TRISIO3 (MCLR) siempre se lee como 1 cuando es entrada.
+  TRISIO := %00010111;
+
+  // 4. Configurar registros base del ADC (ADCON0)
+  ADCON0.7 := 1;  // ADFM = 1: Justificado a la derecha
+
+  // Inicializar pin Tx en ALTO
+  GPIO.TX_PIN := 1;
+  Delay_ms(500);
+
+  Milford_Clear_Screen;
+
+  while True do
+  begin
+    // --- LÍNEA 1 DEL LCD ---
+    Milford_GoTo(128);
+
+    adc_val := Read_ADC_Channel(0);
+    Imprimir_Canal(0, adc_val);
+
+    Serial_Write_Byte(32);
+    Serial_Write_Byte(32);
+    Serial_Write_Byte(32);
+
+    adc_val := Read_ADC_Channel(1);
+    Imprimir_Canal(1, adc_val);
+
+    // --- LÍNEA 2 DEL LCD ---
+    Milford_GoTo(192);
+
+    adc_val := Read_ADC_Channel(2);
+    Imprimir_Canal(2, adc_val);
+
+    Serial_Write_Byte(32);
+    Serial_Write_Byte(32);
+    Serial_Write_Byte(32);
+
+    adc_val := Read_ADC_Channel(3);
+    Imprimir_Canal(3, adc_val);
+
+    Delay_ms(200);
+  end;
+end.
